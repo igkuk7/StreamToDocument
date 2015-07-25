@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-import sys, getopt, urlparse, urllib, urllib2, json, datetime, os
+import sys, getopt, urlparse, urllib, urllib2, json, datetime, os, pprint
 from PIL import Image,  ImageFont, ImageDraw
 
 DATE_FORMAT = "%d/%m/%Y"
@@ -8,7 +8,10 @@ DATE_FORMAT = "%d/%m/%Y"
 ARGS = {
 	"-f": ( "Start Date", "Start Date to search from, format DD/MM/YYYY" ),
 	"-t": ( "End Date",   "End Date to search to, format DD/MM/YYYY"     ),
+	"-o": ( "File",   "HTML file to write to"     ),
 }
+
+DEBUG = False
 
 # TODO: global vars for URLs etc..
 API_URL = "https://api.instagram.com"
@@ -28,12 +31,22 @@ def get_user_posts(start_date=None, end_date=None):
 		params["max_timestamp"] = end_date.strftime("%s")
 
 	posts = api_call(API_USERS_URL+"self/media/recent/", params);
-	return posts
+	post_data = posts["data"]
+	while "pagination" in posts and "next_url" in posts["pagination"]:
+		log("Fetching next page of results")
+		posts = api_call(posts["pagination"]["next_url"], no_params=True);
+		post_data += posts["data"]
+
+	return post_data
 
 
-def api_call(url, params={}):
+def api_call(url, params={}, no_params=False):
 	params["access_token"] = ACCESS_TOKEN
-	result = urllib2.urlopen(url+"?"+urllib.urlencode(params))
+	full_url = url
+	if not no_params:
+		full_url += "?"+urllib.urlencode(params)
+	log("API Call: "+full_url)
+	result = urllib2.urlopen(full_url)
 	data = json.loads(result.read())
 	parse_api_errors(data)
 	return data
@@ -54,10 +67,11 @@ def authenticate():
 	parse_api_errors(result_url_args)
 
 	# get the access token, will be after the # at the end of the url
-	ACCESS_TOKEN = result_url.split("#")[-1]
+	ACCESS_TOKEN = result_url.split("#")[-1].split('=')[-1]
 	if ACCESS_TOKEN == "":
 		print result_url_args
 		error("Excepted access_token in result url")
+	log("Access Token: "+ACCESS_TOKEN)
 
 
 def parse_api_errors(args):
@@ -85,15 +99,17 @@ def get_post_data(post):
 	extension = post["images"]["standard_resolution"]["url"].split(".")[-1]
 	post_data = {
 		"created"   : created,
-		"caption"   : post["caption"]["text"],
+		"caption"   : post["caption"]["text"] if "caption" in post and post["caption"] is not None else "",
 		"image_url" : image_url,
 	}
 
 	return post_data
 
 def build_post_div(post_data):
+	date = post_data["created"].strftime("%d/%m/%Y")
+	log("Generating output for post on "+date+": "+post_data["caption"][0:20])
 	img = "<img src='"+post_data["image_url"]+"' />"
-	date = "<p><strong>"+post_data["created"].strftime("%d/%m/%Y")+"</strong></p>"
+	date = "<p><strong>"+date+"</strong></p>"
 	caption = "<p>"+post_data["caption"]+"</p>"
 
 
@@ -103,7 +119,7 @@ def build_post_div(post_data):
 
 def main(script_name, argv):
 	try:
-		opts, args = getopt.getopt(argv, "h"+"".join(map(lambda x: x+":", ARGS.keys())))
+		opts, args = getopt.getopt(argv, "hd"+"".join(map(lambda x: x+":", ARGS.keys())))
 	except getopt.GetoptError as e:
 		print e
 		usage(1)
@@ -114,6 +130,8 @@ def main(script_name, argv):
 	for opt, arg in opts:
 		if opt == "-h":
 			usage(0)
+		elif opt == "-d":
+			DEBUG = True
 		elif opt in ARGS:
 			script_args[opt] = arg
 
@@ -121,23 +139,34 @@ def main(script_name, argv):
 	start_date = get_datetime( script_args["-f"] if "-f" in script_args else "" )
 	end_date   = get_datetime( script_args["-t"] if "-t" in script_args else "" )
 
+	if "-o" not in script_args:
+		usage(1, "Missing output file")
+	output_file = script_args["-o"]
+
 	# authenticate
+	log("Authenticating")
 	authenticate()
+
+	# fetch posts
+	log("Fetching user posts")
 	posts = get_user_posts(start_date, end_date)
 
 	# sort data earliest to latest
-	html_divs = []
-	for post in sorted(posts["data"], reverse=False):
+	divs = []
+	for post in sorted(posts, reverse=False):
 		post_data = get_post_data(post)
 		html_div = build_post_div(post_data)
-		html_divs.append(html_div)
+		divs.append(html_div)
 
-	print "<html><body>"
-	for div in html_divs:
-		print div
-	print "</body></html>"
+	# generate file to write to
+	log("Writing HTML file")
+	f = open(output_file, "w")
+	f.write("<html><body>\n")
+	for div in divs:
+		f.write(div+"\n")
+	f.write("</body></html>")
 
-
+	print "Generated HTML file: "+output_file
 
 
 def usage(exit_status, message=""):
@@ -145,11 +174,12 @@ def usage(exit_status, message=""):
 	print "v1.0"
 	print "Generates a HTML document containing Instagram pictures and captions from the request date range"
 	print ""
-	sys.stdout.write("stream_to_document.py")
-	for arg in ARGS.keys():
-		sys.stdout.write(arg+ " ["+ARGS[arg][0]+"]")
-	print " "
 	print message
+	print ""
+	sys.stdout.write("Usage: stream_to_document.py")
+	for arg in ARGS.keys():
+		sys.stdout.write(" "+arg+ " ["+ARGS[arg][0]+"]")
+	print "\n"
 	for arg in ARGS.keys():
 		print ARGS[arg][0] + " - " + ARGS[arg][1]
 	sys.exit(exit_status)
@@ -158,6 +188,10 @@ def usage(exit_status, message=""):
 def error(message=""):
 	print message
 	sys.exit(1)
+
+def log(message):
+	if DEBUG:
+		print message
 
 
 if __name__ == "__main__":
