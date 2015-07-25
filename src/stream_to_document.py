@@ -8,7 +8,6 @@ DATE_FORMAT = "%d/%m/%Y"
 ARGS = {
 	"-f": ( "Start Date", "Start Date to search from, format DD/MM/YYYY" ),
 	"-t": ( "End Date",   "End Date to search to, format DD/MM/YYYY"     ),
-	"-o": ( "Output Directory",   "All fetched images will have a caption added to them and placed in this directory"     ),
 }
 
 # TODO: global vars for URLs etc..
@@ -19,7 +18,7 @@ API_USERS_URL = API_URL+"/v1/users/"
 # TODO: from config
 REDIRECT_URL = "https://github.com/igkuk7/StreamToDocument"
 CLIENT_ID = "418b90ba16fe4ab3a55727087d8d845b"
-ACCESS_TOKEN = "1635247040.418b90b.d30cce44f28c47f5a6ddae5e49a77bad"
+ACCESS_TOKEN = ""
 
 def get_user_posts(start_date=None, end_date=None):
 	params = {}
@@ -80,7 +79,7 @@ def get_datetime(date=""):
 	return dt
 
 
-def get_post_data(output_dir, post):
+def get_post_data(post):
 	created = datetime.datetime.fromtimestamp(float(post["created_time"]))
 	image_url = post["images"]["standard_resolution"]["url"]
 	extension = post["images"]["standard_resolution"]["url"].split(".")[-1]
@@ -88,32 +87,18 @@ def get_post_data(output_dir, post):
 		"created"   : created,
 		"caption"   : post["caption"]["text"],
 		"image_url" : image_url,
-		"extension" : extension,
-		"file_name" : output_dir + "/" + created.strftime("%s") + "." + extension,
 	}
-
-	urllib.urlretrieve(post_data["image_url"], post_data["file_name"])
-
-	post_data["captioned_file_name"] = add_caption_to_image(post_data["file_name"], post_data["caption"])
 
 	return post_data
 
+def build_post_div(post_data):
+	img = "<img src='"+post_data["image_url"]+"' />"
+	date = "<p><strong>"+post_data["created"].strftime("%d/%m/%Y")+"</strong></p>"
+	caption = "<p>"+post_data["caption"]+"</p>"
 
 
-def add_caption_to_image(image_file_name, caption):
-	extension = image_file_name.split(".")[-1]
-	caption_image_file_name = image_file_name.replace("."+extension, "-captioned."+extension)
+	return "<div>\n\t"+img+"\n\t"+date+"\n\t"+caption+"\n</div>"
 
-	# open the image and write the caption to it
-	image = Image.open(image_file_name)
-	draw = ImageDraw.Draw(image)
-	#font = ImageFont.truetype("arial.ttf", 16)
-	caption_size = draw.textsize(caption)
-	border = 10
-	draw.text((border, image.size[1]-border-caption_size[1]), caption, (255,255,255))
-	image.save(caption_image_file_name)
-
-	return caption_image_file_name
 
 
 def main(script_name, argv):
@@ -136,29 +121,30 @@ def main(script_name, argv):
 	start_date = get_datetime( script_args["-f"] if "-f" in script_args else "" )
 	end_date   = get_datetime( script_args["-t"] if "-t" in script_args else "" )
 
-	# output dir
-	if "-o" not in script_args:
-		error("Missing Output Directory")
-	output_dir = script_args["-o"]
-	if not os.path.isdir(output_dir):
-		os.makedirs(output_dir)
-
 	# authenticate
 	authenticate()
 	posts = get_user_posts(start_date, end_date)
 
-	#posts_json = '{"pagination":{},"meta":{"code":200},"data":[{"attribution":null,"tags":["manofsteel"],"type":"image","location":null,"comments":{"count":0,"data":[]},"filter":"Valencia","created_time":"1435771379","link":"https:\/\/instagram.com\/p\/4mg0Own-YF\/","likes":{"count":0,"data":[]},"images":{"low_resolution":{"url":"https:\/\/scontent.cdninstagram.com\/hphotos-xfa1\/t51.2885-15\/s320x320\/e15\/11350949_1611348742467118_545601823_n.jpg","width":320,"height":320},"thumbnail":{"url":"https:\/\/scontent.cdninstagram.com\/hphotos-xfa1\/t51.2885-15\/s150x150\/e15\/11350949_1611348742467118_545601823_n.jpg","width":150,"height":150},"standard_resolution":{"url":"https:\/\/scontent.cdninstagram.com\/hphotos-xfa1\/t51.2885-15\/e15\/11350949_1611348742467118_545601823_n.jpg","width":640,"height":640}},"users_in_photo":[],"caption":{"created_time":"1435771379","text":"Awful, boring, with a decent ending #manofsteel","from":{"username":"igkuk7","profile_picture":"https:\/\/instagramimages-a.akamaihd.net\/profiles\/anonymousUser.jpg","id":"1635247040","full_name":""},"id":"1019646695230662304"},"user_has_liked":false,"id":"1019646692395312645_1635247040","user":{"username":"igkuk7","profile_picture":"https:\/\/instagramimages-a.akamaihd.net\/profiles\/anonymousUser.jpg","id":"1635247040","full_name":""}}]}'
-	#posts = json.loads(posts_json)
+	# sort data earliest to latest
+	html_divs = []
+	for post in sorted(posts["data"], reverse=False):
+		post_data = get_post_data(post)
+		html_div = build_post_div(post_data)
+		html_divs.append(html_div)
 
-	for post in posts["data"]:
-		post_data = get_post_data(output_dir, post)
-
-		print post_data
+	print "<html><body>"
+	for div in html_divs:
+		print div
+	print "</body></html>"
 
 
 
 
 def usage(exit_status, message=""):
+	print "StreamToDocument"
+	print "v1.0"
+	print "Generates a HTML document containing Instagram pictures and captions from the request date range"
+	print ""
 	sys.stdout.write("stream_to_document.py")
 	for arg in ARGS.keys():
 		sys.stdout.write(arg+ " ["+ARGS[arg][0]+"]")
